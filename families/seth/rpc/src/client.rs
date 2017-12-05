@@ -198,7 +198,7 @@ impl<S: MessageSender> ValidatorClient<S> {
         &self.accounts
     }
 
-    pub fn request<T, U>(&mut self, msg_type: Message_MessageType, msg: &T) -> Result<U, String>
+    fn request<T, U>(&mut self, msg_type: Message_MessageType, msg: &T) -> Result<U, String>
         where T: protobuf::Message, U: protobuf::MessageStatic
     {
         let msg_bytes = match protobuf::Message::write_to_bytes(msg) {
@@ -239,7 +239,7 @@ impl<S: MessageSender> ValidatorClient<S> {
         Ok(response)
     }
 
-    pub fn send_request<T, U>(&mut self, msg_type: Message_MessageType, msg: &T) -> Result<U, Error>
+    fn send_request<T, U>(&mut self, msg_type: Message_MessageType, msg: &T) -> Result<U, Error>
         where T: protobuf::Message, U: protobuf::MessageStatic
     {
         let msg_bytes = protobuf::Message::write_to_bytes(msg).map_err(|error|
@@ -481,7 +481,7 @@ impl<S: MessageSender> ValidatorClient<S> {
         }
     }
 
-    pub fn get_entry(&mut self, account_address: String, block: BlockKey) -> Result<Option<EvmEntry>, String> {
+    fn get_entry(&mut self, account_address: String, block: BlockKey) -> Result<Option<EvmEntry>, String> {
         let address = String::from(SETH_NS) + &account_address + "000000000000000000000000";
         let mut request = ClientStateGetRequest::new();
         request.set_address(address);
