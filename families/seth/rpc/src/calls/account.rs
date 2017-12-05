@@ -18,7 +18,7 @@
 use jsonrpc_core::{Params, Value, Error};
 
 use client::{
-    ValidatorClient,
+    SawtoothClient,
     BlockKey,
     BlockKeyParseError,
 };
@@ -71,12 +71,12 @@ fn validate_storage_address(address: String) -> Result<String, Error> {
     }
 }
 
-pub fn get_balance<T>(params: Params, client: ValidatorClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn get_balance<T>(params: Params, client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
     info!("eth_getBalance");
     get_account(params, client, |account| transform::num_to_hex(&account.balance))
 }
 
-pub fn get_storage_at<T>(params: Params, mut client: ValidatorClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn get_storage_at<T>(params: Params, mut client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
     info!("eth_getStorageAt");
     let (address, position, block): (String, String, String) = match params.parse() {
         Ok(t) => t,
@@ -99,17 +99,17 @@ pub fn get_storage_at<T>(params: Params, mut client: ValidatorClient<T>) -> Resu
     }
 }
 
-pub fn get_code<T>(params: Params, client: ValidatorClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn get_code<T>(params: Params, client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
     info!("eth_getCode");
     get_account(params, client, |account| transform::hex_prefix(&transform::bytes_to_hex_str(&account.code)))
 }
 
-pub fn get_transaction_count<T>(params: Params, client: ValidatorClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn get_transaction_count<T>(params: Params, client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
     info!("eth_getTransactionCount");
     get_account(params, client, |account| transform::num_to_hex(&account.nonce))
 }
 
-fn get_account<T, F>(params: Params, mut client: ValidatorClient<T>, f: F) -> Result<Value, Error> where T: MessageSender, F: Fn(EvmStateAccount) -> Value {
+fn get_account<T, F>(params: Params, mut client: SawtoothClient<T>, f: F) -> Result<Value, Error> where T: MessageSender, F: Fn(EvmStateAccount) -> Value {
     info!("eth_getAccount");
     let (address, block): (String, String) = match params.parse() {
         Ok(t) => t,
@@ -131,7 +131,7 @@ fn get_account<T, F>(params: Params, mut client: ValidatorClient<T>, f: F) -> Re
     }
 }
 
-pub fn accounts<T>(_params: Params, client: ValidatorClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn accounts<T>(_params: Params, client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
     info!("eth_accounts");
     Ok(Value::Array(Vec::from(client.loaded_accounts()).iter().map(|account|
         transform::hex_prefix(account.address())).collect()))

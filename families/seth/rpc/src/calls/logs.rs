@@ -22,7 +22,7 @@ use serde_json::Map;
 use protobuf;
 
 use client::{
-    ValidatorClient,
+    SawtoothClient,
     Error as ClientError,
     BlockKey,
 };
@@ -51,7 +51,7 @@ pub fn get_method_list<T>() -> Vec<(String, RequestHandler<T>)> where T: Message
     methods
 }
 
-pub fn new_filter<T>(params: Params, mut client: ValidatorClient<T>)
+pub fn new_filter<T>(params: Params, mut client: SawtoothClient<T>)
     -> Result<Value, Error> where T: MessageSender
 {
     info!("eth_newFilter");
@@ -69,7 +69,7 @@ pub fn new_filter<T>(params: Params, mut client: ValidatorClient<T>)
     Ok(transform::hex_prefix(&filter_id_to_hex(filter_id)))
 }
 
-pub fn new_block_filter<T>(_params: Params, mut client: ValidatorClient<T>)
+pub fn new_block_filter<T>(_params: Params, mut client: SawtoothClient<T>)
     -> Result<Value, Error> where T: MessageSender
 {
     info!("eth_newBlockFilter");
@@ -81,7 +81,7 @@ pub fn new_block_filter<T>(_params: Params, mut client: ValidatorClient<T>)
     Ok(transform::hex_prefix(&filter_id_to_hex(filter_id)))
 }
 
-pub fn new_pending_transaction_filter<T>(_params: Params, mut client: ValidatorClient<T>)
+pub fn new_pending_transaction_filter<T>(_params: Params, mut client: SawtoothClient<T>)
     -> Result<Value, Error> where T: MessageSender
 {
     info!("eth_newPendingTransactionFilter");
@@ -93,7 +93,7 @@ pub fn new_pending_transaction_filter<T>(_params: Params, mut client: ValidatorC
     Ok(transform::hex_prefix(&filter_id_to_hex(filter_id)))
 }
 
-pub fn uninstall_filter<T>(params: Params, mut client: ValidatorClient<T>)
+pub fn uninstall_filter<T>(params: Params, mut client: SawtoothClient<T>)
     -> Result<Value, Error> where T: MessageSender
 {
     info!("eth_uninstallFilter");
@@ -105,7 +105,7 @@ pub fn uninstall_filter<T>(params: Params, mut client: ValidatorClient<T>)
     Ok(Value::Bool(client.filters.remove_filter(&filter_id).is_some()))
 }
 
-pub fn get_filter_changes<T>(params: Params, mut client: ValidatorClient<T>)
+pub fn get_filter_changes<T>(params: Params, mut client: SawtoothClient<T>)
     -> Result<Value, Error> where T: MessageSender
 {
     info!("eth_getFilterChanges");
@@ -167,7 +167,7 @@ pub fn get_filter_changes<T>(params: Params, mut client: ValidatorClient<T>)
     Ok(Value::Array(response))
 }
 
-pub fn get_filter_logs<T>(params: Params, mut client: ValidatorClient<T>)
+pub fn get_filter_logs<T>(params: Params, mut client: SawtoothClient<T>)
     -> Result<Value, Error> where T: MessageSender
 {
     info!("eth_getFilterLogs");
@@ -186,7 +186,7 @@ pub fn get_filter_logs<T>(params: Params, mut client: ValidatorClient<T>)
     }
 }
 
-pub fn get_logs<T>(params: Params, mut client: ValidatorClient<T>)
+pub fn get_logs<T>(params: Params, mut client: SawtoothClient<T>)
     -> Result<Value, Error> where T: MessageSender
 {
     info!("eth_getLogs");
@@ -197,7 +197,7 @@ pub fn get_logs<T>(params: Params, mut client: ValidatorClient<T>)
     get_logs_from_filter(&mut client, &log_filter)
 }
 
-fn get_logs_from_filter<T>(mut client: &mut ValidatorClient<T>, log_filter: &LogFilter)
+fn get_logs_from_filter<T>(mut client: &mut SawtoothClient<T>, log_filter: &LogFilter)
     -> Result<Value, Error>
     where T: MessageSender
 {
@@ -265,7 +265,7 @@ fn get_logs_from_filter<T>(mut client: &mut ValidatorClient<T>, log_filter: &Log
     }
 }
 
-fn get_logs_from_block_and_filter<T>(client: &mut ValidatorClient<T>, block: &Block, log_filter: &LogFilter)
+fn get_logs_from_block_and_filter<T>(client: &mut SawtoothClient<T>, block: &Block, log_filter: &LogFilter)
     -> Result<Vec<Value>, Error>
     where T: MessageSender
 {

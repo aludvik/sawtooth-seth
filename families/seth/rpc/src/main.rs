@@ -50,7 +50,7 @@ mod filters;
 mod transactions;
 mod transform;
 
-use client::{ValidatorClient};
+use client::{SawtoothClient};
 use requests::{RequestExecutor, RequestHandler};
 use accounts::{Account};
 use calls::*;
@@ -96,7 +96,7 @@ fn main() {
     let mut io = IoHandler::new();
     let connection = ZmqMessageConnection::new(connect);
     let (sender, _) = connection.create();
-    let client = ValidatorClient::new(sender, accounts);
+    let client = SawtoothClient::new(sender, accounts);
     let executor = RequestExecutor::new(client);
 
     let methods = get_method_list();

@@ -179,15 +179,15 @@ impl From<AccountError> for Error {
 }
 
 #[derive(Clone)]
-pub struct ValidatorClient<S: MessageSender> {
+pub struct SawtoothClient<S: MessageSender> {
     sender: S,
     accounts: Vec<Account>,
     pub filters: FilterManager,
 }
 
-impl<S: MessageSender> ValidatorClient<S> {
+impl<S: MessageSender> SawtoothClient<S> {
     pub fn new(sender: S, accounts: Vec<Account>) -> Self {
-        ValidatorClient{
+        SawtoothClient{
             sender: sender,
             accounts: accounts,
             filters: FilterManager::new(),
