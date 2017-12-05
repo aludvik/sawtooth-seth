@@ -178,11 +178,281 @@ impl From<AccountError> for Error {
     }
 }
 
+pub trait Client {
+    fn loaded_accounts(&self) -> &[Account];
+    fn send_transaction(&mut self, from: &str, txn: SethTransaction) -> Result<String, Error>;
+    fn get_receipts_from_block(&mut self, block: &Block) -> Result<HashMap<String, SethReceipt>, String>;
+    fn get_receipts(&mut self, transaction_ids: &[String]) -> Result<HashMap<String, SethReceipt>, Error>;
+    fn get_transaction_and_block(&mut self, txn_key: &TransactionKey) -> Result<(Transaction, Option<Block>), Error>;
+    fn get_block(&mut self, block_key: BlockKey) -> Result<Block, Error>;
+    fn get_account(&mut self, account_address: String, block: BlockKey) -> Result<Option<EvmStateAccount>, String>;
+    fn get_storage(&mut self, account_address: String, block: BlockKey) -> Result<Option<Vec<EvmStorage>>, String>;
+    fn get_storage_at(&mut self, account_address: String, storage_address: String, block: BlockKey) -> Result<Option<Vec<u8>>, String>;
+    fn get_current_block(&mut self) -> Result<Block, Error>;
+    fn get_current_block_number(&mut self) -> Result<u64, Error>;
+    fn get_blocks_since(&mut self, since: u64) -> Result<Vec<(u64, Block)>, Error>;
+}
+
 #[derive(Clone)]
 pub struct SawtoothClient<S: MessageSender> {
     sender: S,
     accounts: Vec<Account>,
     pub filters: FilterManager,
+}
+
+impl<S: MessageSender> Client for SawtoothClient<S> {
+    fn loaded_accounts(&self) -> &[Account] {
+        &self.accounts
+    }
+
+    fn send_transaction(&mut self, from: &str, txn: SethTransaction) -> Result<String, Error> {
+        let (batch, txn_signature) = self.make_batch(from, txn)?;
+
+        let mut request = ClientBatchSubmitRequest::new();
+        request.set_batches(protobuf::RepeatedField::from_vec(vec![batch]));
+
+        let response: ClientBatchSubmitResponse =
+            self.send_request(Message_MessageType::CLIENT_BATCH_SUBMIT_REQUEST, &request)?;
+
+        match response.status {
+            ClientBatchSubmitResponse_Status::STATUS_UNSET => Err(Error::ValidatorError),
+            ClientBatchSubmitResponse_Status::OK => Ok(txn_signature),
+            ClientBatchSubmitResponse_Status::INTERNAL_ERROR => Err(Error::ValidatorError),
+            ClientBatchSubmitResponse_Status::INVALID_BATCH => Err(Error::InvalidTransaction),
+        }
+    }
+
+    fn get_receipts_from_block(&mut self, block: &Block) -> Result<HashMap<String, SethReceipt>, String> {
+        let batches = &block.batches;
+        let mut transactions = Vec::new();
+        for batch in batches.iter() {
+            for txn in batch.transactions.iter() {
+                let header: TransactionHeader = match protobuf::parse_from_bytes(&txn.header) {
+                    Ok(h) => h,
+                    Err(_) => {
+                        continue;
+                    },
+                };
+                if header.family_name == "seth" {
+                    transactions.push(String::from(txn.header_signature.clone()));
+                }
+            }
+        }
+
+        let receipts = self.get_receipts(&transactions).map_err(|error| match error {
+            Error::ValidatorError => String::from("Received internal error from validator"),
+            Error::NoResource => String::from("Missing receipt"),
+            _ => String::from("Unknown error"),
+        })?;
+
+        Ok(receipts)
+    }
+
+    fn get_receipts(&mut self, transaction_ids: &[String])
+        -> Result<HashMap<String, SethReceipt>, Error>
+    {
+        let mut request = ClientReceiptGetRequest::new();
+        request.set_transaction_ids(protobuf::RepeatedField::from_vec(Vec::from(transaction_ids)));
+        let response: ClientReceiptGetResponse =
+            self.send_request(Message_MessageType::CLIENT_RECEIPT_GET_REQUEST, &request)?;
+
+        let receipts = match response.status {
+            ClientReceiptGetResponse_Status::STATUS_UNSET => {
+                return Err(Error::ValidatorError);
+            },
+            ClientReceiptGetResponse_Status::OK => response.receipts,
+            ClientReceiptGetResponse_Status::INTERNAL_ERROR => {
+                return Err(Error::ValidatorError);
+            },
+            ClientReceiptGetResponse_Status::NO_RESOURCE => {
+                return Err(Error::NoResource);
+            },
+        };
+        let seth_receipt_list: Vec<SethReceipt> = receipts.iter()
+            .map(SethReceipt::from_receipt_pb)
+            .collect::<Result<Vec<SethReceipt>, Error>>()?;
+        let mut seth_receipt_map = HashMap::with_capacity(seth_receipt_list.len());
+        for receipt in seth_receipt_list.into_iter() {
+            seth_receipt_map.insert(receipt.transaction_id.clone(), receipt);
+        }
+
+        Ok(seth_receipt_map)
+    }
+
+    fn get_transaction_and_block(&mut self, txn_key: &TransactionKey) -> Result<(Transaction, Option<Block>), Error> {
+        match txn_key {
+            &TransactionKey::Signature(ref txn_id) => {
+                let mut request = ClientTransactionGetRequest::new();
+                request.set_transaction_id((*txn_id).clone());
+                let mut response: ClientTransactionGetResponse =
+                    self.send_request(
+                        Message_MessageType::CLIENT_TRANSACTION_GET_REQUEST, &request)?;
+
+                let block = {
+                    self.get_block(BlockKey::Transaction(txn_id.clone())).ok()
+                };
+
+                match response.status {
+                    ClientTransactionGetResponse_Status::STATUS_UNSET => {
+                        Err(Error::ValidatorError)
+                    },
+                    ClientTransactionGetResponse_Status::INTERNAL_ERROR => {
+                        Err(Error::ValidatorError)
+                    },
+                    ClientTransactionGetResponse_Status::NO_RESOURCE => {
+                        Err(Error::NoResource)
+                    },
+                    ClientTransactionGetResponse_Status::OK => {
+                        let txn = Transaction::try_from(response.take_transaction())?;
+                        Ok((txn, block))
+                    },
+                }
+            },
+            &TransactionKey::Index((ref index, ref block_key)) => {
+                let mut idx = *index;
+                let mut block = self.get_block((*block_key).clone())?;
+                for mut batch in block.take_batches().into_iter() {
+                    for txn in batch.take_transactions().into_iter() {
+                        if idx == 0 {
+                            let txn = Transaction::try_from(txn)?;
+                            return Ok((txn, Some(block)));
+                        }
+                        idx -= 1;
+                    }
+                }
+                Err(Error::NoResource)
+            }
+        }
+    }
+
+    fn get_block(&mut self, block_key: BlockKey) -> Result<Block, Error> {
+        let response: ClientBlockGetResponse;
+        match block_key {
+            BlockKey::Signature(block_id) => {
+                let mut request = ClientBlockGetByIdRequest::new();
+                let message_type: Message_MessageType = Message_MessageType::CLIENT_BLOCK_GET_BY_ID_REQUEST;
+                request.set_block_id(block_id);
+                response = self.send_request(message_type, &request)?;
+            },
+            BlockKey::Number(block_num) => {
+                let mut request = ClientBlockGetByNumRequest::new();
+                let message_type: Message_MessageType = Message_MessageType::CLIENT_BLOCK_GET_BY_NUM_REQUEST;
+                request.set_block_num(block_num);
+                response = self.send_request(message_type, &request)?;
+            },
+            BlockKey::Latest => {
+                return self.get_current_block();
+            },
+            BlockKey::Earliest => {
+                let mut request = ClientBlockGetByIdRequest::new();
+                let message_type: Message_MessageType = Message_MessageType::CLIENT_BLOCK_GET_BY_ID_REQUEST;
+                request.set_block_id(String::from("0000000000000000"));
+                response = self.send_request(message_type, &request)?;
+            },
+            BlockKey::Transaction(transaction_id) => {
+                let mut request = ClientBlockGetByTransactionIdRequest::new();
+                let message_type: Message_MessageType = Message_MessageType::CLIENT_BLOCK_GET_BY_TRANSACTION_ID_REQUEST;
+                request.set_transaction_id(transaction_id);
+                response = self.send_request(message_type, &request)?;
+            },
+        };
+
+        match response.status {
+            ClientBlockGetResponse_Status::STATUS_UNSET=> {
+                Err(Error::ValidatorError)
+            },
+            ClientBlockGetResponse_Status::INTERNAL_ERROR => {
+                Err(Error::ValidatorError)
+            },
+            ClientBlockGetResponse_Status::NO_RESOURCE => {
+                Err(Error::NoResource)
+            },
+            ClientBlockGetResponse_Status::OK => {
+                if let Some(block) = response.block.into_option() {
+                    Ok(block)
+                } else {
+                    Err(Error::NoResource)
+                }
+            },
+        }
+    }
+
+    fn get_account(&mut self, account_address: String, block: BlockKey) -> Result<Option<EvmStateAccount>, String> {
+        self.get_entry(account_address, block).map(|option|
+            option.map(|mut entry| entry.take_account()))
+    }
+
+    fn get_storage(&mut self, account_address: String, block: BlockKey) -> Result<Option<Vec<EvmStorage>>, String> {
+        self.get_entry(account_address, block).map(|option|
+            option.map(|mut entry| entry.take_storage().into_vec()))
+    }
+
+    fn get_storage_at(&mut self, account_address: String, storage_address: String, block: BlockKey) -> Result<Option<Vec<u8>>, String> {
+        let storage = self.get_storage(account_address, block)?;
+
+        match storage {
+            Some(storage) => {
+                let position = match transform::hex_str_to_bytes(&storage_address) {
+                    Some(p) => p,
+                    None => {
+                        return Err(String::from("Failed to decode position, invalid hex."));
+                    }
+                };
+                for entry in storage.into_iter() {
+                    if entry.key == position {
+                        return Ok(Some(Vec::from(entry.value)));
+                    }
+                }
+                return Ok(None);
+            },
+            None => {
+                return Ok(None);
+            }
+        }
+    }
+
+    fn get_current_block(&mut self) -> Result<Block, Error> {
+        let mut paging = ClientPagingControls::new();
+        paging.set_count(1);
+        let mut request = ClientBlockListRequest::new();
+        request.set_paging(paging);
+
+        let response: ClientBlockListResponse =
+           self.send_request(Message_MessageType::CLIENT_BLOCK_LIST_REQUEST, &request)?;
+
+        let block = &response.blocks[0];
+        Ok(block.clone())
+    }
+
+    fn get_current_block_number(&mut self) -> Result<u64, Error> {
+        let block = self.get_current_block()?;
+        let block_header: BlockHeader = protobuf::parse_from_bytes(&block.header).map_err(|error|
+            Error::ParseError(format!("Error parsing block_header: {:?}", error)))?;
+        Ok(block_header.block_num)
+    }
+
+    fn get_blocks_since(&mut self, since: u64) -> Result<Vec<(u64, Block)>, Error> {
+        let block = self.get_current_block()?;
+        let block_header: BlockHeader = protobuf::parse_from_bytes(&block.header).map_err(|error|
+            Error::ParseError(format!("Error parsing block_header: {:?}", error)))?;
+        let block_num = block_header.block_num;
+        if block_num <= since {
+            return Ok(Vec::new());
+        }
+
+        let mut blocks = Vec::with_capacity((block_num - (since+1)) as usize);
+        for block_num in (since+1)..block_num {
+            let block = self.get_block(BlockKey::Number(block_num))?;
+            let block_header: BlockHeader = protobuf::parse_from_bytes(&block.header).map_err(|error|
+                Error::ParseError(format!("Error parsing block_header: {:?}", error)))?;
+            let block_num = block_header.block_num;
+            blocks.push((block_num, block));
+        }
+        blocks.push((block_num, block));
+
+        Ok(blocks)
+    }
+
 }
 
 impl<S: MessageSender> SawtoothClient<S> {
@@ -192,10 +462,6 @@ impl<S: MessageSender> SawtoothClient<S> {
             accounts: accounts,
             filters: FilterManager::new(),
         }
-    }
-
-    pub fn loaded_accounts(&self) -> &[Account] {
-        &self.accounts
     }
 
     fn request<T, U>(&mut self, msg_type: Message_MessageType, msg: &T) -> Result<U, String>
@@ -254,23 +520,6 @@ impl<S: MessageSender> SawtoothClient<S> {
             Error::ParseError(String::from(format!("Error parsing response: {:?}", error))))
     }
 
-    pub fn send_transaction(&mut self, from: &str, txn: SethTransaction) -> Result<String, Error> {
-        let (batch, txn_signature) = self.make_batch(from, txn)?;
-
-        let mut request = ClientBatchSubmitRequest::new();
-        request.set_batches(protobuf::RepeatedField::from_vec(vec![batch]));
-
-        let response: ClientBatchSubmitResponse =
-            self.send_request(Message_MessageType::CLIENT_BATCH_SUBMIT_REQUEST, &request)?;
-
-        match response.status {
-            ClientBatchSubmitResponse_Status::STATUS_UNSET => Err(Error::ValidatorError),
-            ClientBatchSubmitResponse_Status::OK => Ok(txn_signature),
-            ClientBatchSubmitResponse_Status::INTERNAL_ERROR => Err(Error::ValidatorError),
-            ClientBatchSubmitResponse_Status::INVALID_BATCH => Err(Error::InvalidTransaction),
-        }
-    }
-
     fn make_batch(&self, from: &str, txn: SethTransaction) -> Result<(Batch, String), Error> {
         let payload = protobuf::Message::write_to_bytes(&txn.to_pb()).map_err(|error|
             Error::ParseError(String::from(
@@ -324,161 +573,6 @@ impl<S: MessageSender> SawtoothClient<S> {
         batch.set_transactions(protobuf::RepeatedField::from_vec(vec![txn]));
 
         Ok((batch, txn_signature))
-    }
-
-    pub fn get_receipts_from_block(&mut self, block: &Block) -> Result<HashMap<String, SethReceipt>, String> {
-        let batches = &block.batches;
-        let mut transactions = Vec::new();
-        for batch in batches.iter() {
-            for txn in batch.transactions.iter() {
-                let header: TransactionHeader = match protobuf::parse_from_bytes(&txn.header) {
-                    Ok(h) => h,
-                    Err(_) => {
-                        continue;
-                    },
-                };
-                if header.family_name == "seth" {
-                    transactions.push(String::from(txn.header_signature.clone()));
-                }
-            }
-        }
-
-        let receipts = self.get_receipts(&transactions).map_err(|error| match error {
-            Error::ValidatorError => String::from("Received internal error from validator"),
-            Error::NoResource => String::from("Missing receipt"),
-            _ => String::from("Unknown error"),
-        })?;
-
-        Ok(receipts)
-    }
-
-    pub fn get_receipts(&mut self, transaction_ids: &[String])
-        -> Result<HashMap<String, SethReceipt>, Error>
-    {
-        let mut request = ClientReceiptGetRequest::new();
-        request.set_transaction_ids(protobuf::RepeatedField::from_vec(Vec::from(transaction_ids)));
-        let response: ClientReceiptGetResponse =
-            self.send_request(Message_MessageType::CLIENT_RECEIPT_GET_REQUEST, &request)?;
-
-        let receipts = match response.status {
-            ClientReceiptGetResponse_Status::STATUS_UNSET => {
-                return Err(Error::ValidatorError);
-            },
-            ClientReceiptGetResponse_Status::OK => response.receipts,
-            ClientReceiptGetResponse_Status::INTERNAL_ERROR => {
-                return Err(Error::ValidatorError);
-            },
-            ClientReceiptGetResponse_Status::NO_RESOURCE => {
-                return Err(Error::NoResource);
-            },
-        };
-        let seth_receipt_list: Vec<SethReceipt> = receipts.iter()
-            .map(SethReceipt::from_receipt_pb)
-            .collect::<Result<Vec<SethReceipt>, Error>>()?;
-        let mut seth_receipt_map = HashMap::with_capacity(seth_receipt_list.len());
-        for receipt in seth_receipt_list.into_iter() {
-            seth_receipt_map.insert(receipt.transaction_id.clone(), receipt);
-        }
-
-        Ok(seth_receipt_map)
-    }
-
-    pub fn get_transaction_and_block(&mut self, txn_key: &TransactionKey) -> Result<(Transaction, Option<Block>), Error> {
-        match txn_key {
-            &TransactionKey::Signature(ref txn_id) => {
-                let mut request = ClientTransactionGetRequest::new();
-                request.set_transaction_id((*txn_id).clone());
-                let mut response: ClientTransactionGetResponse =
-                    self.send_request(
-                        Message_MessageType::CLIENT_TRANSACTION_GET_REQUEST, &request)?;
-
-                let block = {
-                    self.get_block(BlockKey::Transaction(txn_id.clone())).ok()
-                };
-
-                match response.status {
-                    ClientTransactionGetResponse_Status::STATUS_UNSET => {
-                        Err(Error::ValidatorError)
-                    },
-                    ClientTransactionGetResponse_Status::INTERNAL_ERROR => {
-                        Err(Error::ValidatorError)
-                    },
-                    ClientTransactionGetResponse_Status::NO_RESOURCE => {
-                        Err(Error::NoResource)
-                    },
-                    ClientTransactionGetResponse_Status::OK => {
-                        let txn = Transaction::try_from(response.take_transaction())?;
-                        Ok((txn, block))
-                    },
-                }
-            },
-            &TransactionKey::Index((ref index, ref block_key)) => {
-                let mut idx = *index;
-                let mut block = self.get_block((*block_key).clone())?;
-                for mut batch in block.take_batches().into_iter() {
-                    for txn in batch.take_transactions().into_iter() {
-                        if idx == 0 {
-                            let txn = Transaction::try_from(txn)?;
-                            return Ok((txn, Some(block)));
-                        }
-                        idx -= 1;
-                    }
-                }
-                Err(Error::NoResource)
-            }
-        }
-    }
-
-    pub fn get_block(&mut self, block_key: BlockKey) -> Result<Block, Error> {
-        let response: ClientBlockGetResponse;
-        match block_key {
-            BlockKey::Signature(block_id) => {
-                let mut request = ClientBlockGetByIdRequest::new();
-                let message_type: Message_MessageType = Message_MessageType::CLIENT_BLOCK_GET_BY_ID_REQUEST;
-                request.set_block_id(block_id);
-                response = self.send_request(message_type, &request)?;
-            },
-            BlockKey::Number(block_num) => {
-                let mut request = ClientBlockGetByNumRequest::new();
-                let message_type: Message_MessageType = Message_MessageType::CLIENT_BLOCK_GET_BY_NUM_REQUEST;
-                request.set_block_num(block_num);
-                response = self.send_request(message_type, &request)?;
-            },
-            BlockKey::Latest => {
-                return self.get_current_block();
-            },
-            BlockKey::Earliest => {
-                let mut request = ClientBlockGetByIdRequest::new();
-                let message_type: Message_MessageType = Message_MessageType::CLIENT_BLOCK_GET_BY_ID_REQUEST;
-                request.set_block_id(String::from("0000000000000000"));
-                response = self.send_request(message_type, &request)?;
-            },
-            BlockKey::Transaction(transaction_id) => {
-                let mut request = ClientBlockGetByTransactionIdRequest::new();
-                let message_type: Message_MessageType = Message_MessageType::CLIENT_BLOCK_GET_BY_TRANSACTION_ID_REQUEST;
-                request.set_transaction_id(transaction_id);
-                response = self.send_request(message_type, &request)?;
-            },
-        };
-
-        match response.status {
-            ClientBlockGetResponse_Status::STATUS_UNSET=> {
-                Err(Error::ValidatorError)
-            },
-            ClientBlockGetResponse_Status::INTERNAL_ERROR => {
-                Err(Error::ValidatorError)
-            },
-            ClientBlockGetResponse_Status::NO_RESOURCE => {
-                Err(Error::NoResource)
-            },
-            ClientBlockGetResponse_Status::OK => {
-                if let Some(block) = response.block.into_option() {
-                    Ok(block)
-                } else {
-                    Err(Error::NoResource)
-                }
-            },
-        }
     }
 
     fn get_entry(&mut self, account_address: String, block: BlockKey) -> Result<Option<EvmEntry>, String> {
@@ -553,82 +647,6 @@ impl<S: MessageSender> SawtoothClient<S> {
                 Err(String::from(format!("Failed to deserialize EVM entry: {:?}", error)))
             },
         }
-    }
-
-    pub fn get_account(&mut self, account_address: String, block: BlockKey) -> Result<Option<EvmStateAccount>, String> {
-        self.get_entry(account_address, block).map(|option|
-            option.map(|mut entry| entry.take_account()))
-    }
-
-    pub fn get_storage(&mut self, account_address: String, block: BlockKey) -> Result<Option<Vec<EvmStorage>>, String> {
-        self.get_entry(account_address, block).map(|option|
-            option.map(|mut entry| entry.take_storage().into_vec()))
-    }
-
-    pub fn get_storage_at(&mut self, account_address: String, storage_address: String, block: BlockKey) -> Result<Option<Vec<u8>>, String> {
-        let storage = self.get_storage(account_address, block)?;
-
-        match storage {
-            Some(storage) => {
-                let position = match transform::hex_str_to_bytes(&storage_address) {
-                    Some(p) => p,
-                    None => {
-                        return Err(String::from("Failed to decode position, invalid hex."));
-                    }
-                };
-                for entry in storage.into_iter() {
-                    if entry.key == position {
-                        return Ok(Some(Vec::from(entry.value)));
-                    }
-                }
-                return Ok(None);
-            },
-            None => {
-                return Ok(None);
-            }
-        }
-    }
-
-    pub fn get_current_block(&mut self) -> Result<Block, Error> {
-        let mut paging = ClientPagingControls::new();
-        paging.set_count(1);
-        let mut request = ClientBlockListRequest::new();
-        request.set_paging(paging);
-
-        let response: ClientBlockListResponse =
-           self.send_request(Message_MessageType::CLIENT_BLOCK_LIST_REQUEST, &request)?;
-
-        let block = &response.blocks[0];
-        Ok(block.clone())
-    }
-
-    pub fn get_current_block_number(&mut self) -> Result<u64, Error> {
-        let block = self.get_current_block()?;
-        let block_header: BlockHeader = protobuf::parse_from_bytes(&block.header).map_err(|error|
-            Error::ParseError(format!("Error parsing block_header: {:?}", error)))?;
-        Ok(block_header.block_num)
-    }
-
-    pub fn get_blocks_since(&mut self, since: u64) -> Result<Vec<(u64, Block)>, Error> {
-        let block = self.get_current_block()?;
-        let block_header: BlockHeader = protobuf::parse_from_bytes(&block.header).map_err(|error|
-            Error::ParseError(format!("Error parsing block_header: {:?}", error)))?;
-        let block_num = block_header.block_num;
-        if block_num <= since {
-            return Ok(Vec::new());
-        }
-
-        let mut blocks = Vec::with_capacity((block_num - (since+1)) as usize);
-        for block_num in (since+1)..block_num {
-            let block = self.get_block(BlockKey::Number(block_num))?;
-            let block_header: BlockHeader = protobuf::parse_from_bytes(&block.header).map_err(|error|
-                Error::ParseError(format!("Error parsing block_header: {:?}", error)))?;
-            let block_num = block_header.block_num;
-            blocks.push((block_num, block));
-        }
-        blocks.push((block_num, block));
-
-        Ok(blocks)
     }
 
     fn block_num_to_state_root(&mut self, block_num: u64) -> Result<String, Error> {

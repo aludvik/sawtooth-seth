@@ -18,6 +18,7 @@
 use jsonrpc_core::{Params, Value, Error};
 
 use client::{
+    Client,
     SawtoothClient,
     BlockKey,
     BlockKeyParseError,

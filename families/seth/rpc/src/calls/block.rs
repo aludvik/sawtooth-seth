@@ -23,6 +23,7 @@ use error;
 use requests::{RequestHandler};
 
 use client::{
+    Client,
     SawtoothClient,
     Error as ClientError,
     BlockKey,

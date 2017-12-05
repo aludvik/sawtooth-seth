@@ -22,6 +22,7 @@ use serde_json::Map;
 use protobuf;
 
 use client::{
+    Client,
     SawtoothClient,
     Error as ClientError,
     BlockKey,

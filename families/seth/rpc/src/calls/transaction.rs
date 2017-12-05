@@ -21,6 +21,7 @@ use serde_json::Map;
 use tiny_keccak;
 
 use client::{
+    Client,
     SawtoothClient,
     BlockKey,
     Error as ClientError,
