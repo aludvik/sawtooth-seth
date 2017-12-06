@@ -23,7 +23,6 @@ use protobuf;
 
 use client::{
     Client,
-    SawtoothClient,
     Error as ClientError,
     BlockKey,
 };
@@ -38,8 +37,8 @@ use error;
 use filters::*;
 use transactions::{SethLog};
 
-pub fn get_method_list<T>() -> Vec<(String, RequestHandler<T>)> where T: MessageSender {
-    let mut methods: Vec<(String, RequestHandler<T>)> = Vec::new();
+pub fn get_method_list() -> Vec<(String, RequestHandler)> {
+    let mut methods: Vec<(String, RequestHandler)> = Vec::new();
 
     methods.push((String::from("eth_newFilter"), new_filter));
     methods.push((String::from("eth_newBlockFilter"), new_block_filter));
@@ -52,9 +51,7 @@ pub fn get_method_list<T>() -> Vec<(String, RequestHandler<T>)> where T: Message
     methods
 }
 
-pub fn new_filter<T>(params: Params, mut client: SawtoothClient<T>)
-    -> Result<Value, Error> where T: MessageSender
-{
+pub fn new_filter(params: Params, mut client: Client) -> Result<Value, Error> {
     info!("eth_newFilter");
     let (filter,): (Map<String, Value>,) = params.parse().map_err(|_|
         Error::invalid_params("Takes [filter: OBJECT]"))?;
@@ -70,9 +67,7 @@ pub fn new_filter<T>(params: Params, mut client: SawtoothClient<T>)
     Ok(transform::hex_prefix(&filter_id_to_hex(filter_id)))
 }
 
-pub fn new_block_filter<T>(_params: Params, mut client: SawtoothClient<T>)
-    -> Result<Value, Error> where T: MessageSender
-{
+pub fn new_block_filter(_params: Params, mut client: Client) -> Result<Value, Error> {
     info!("eth_newBlockFilter");
     let current_block = client.get_current_block_number().map_err(|error| {
         error!("Failed to get current block number: {}", error);
@@ -82,9 +77,7 @@ pub fn new_block_filter<T>(_params: Params, mut client: SawtoothClient<T>)
     Ok(transform::hex_prefix(&filter_id_to_hex(filter_id)))
 }
 
-pub fn new_pending_transaction_filter<T>(_params: Params, mut client: SawtoothClient<T>)
-    -> Result<Value, Error> where T: MessageSender
-{
+pub fn new_pending_transaction_filter(_params: Params, mut client: Client) -> Result<Value, Error> {
     info!("eth_newPendingTransactionFilter");
     let current_block = client.get_current_block_number().map_err(|error| {
         error!("Failed to get current block number: {}", error);
@@ -94,9 +87,7 @@ pub fn new_pending_transaction_filter<T>(_params: Params, mut client: SawtoothCl
     Ok(transform::hex_prefix(&filter_id_to_hex(filter_id)))
 }
 
-pub fn uninstall_filter<T>(params: Params, mut client: SawtoothClient<T>)
-    -> Result<Value, Error> where T: MessageSender
-{
+pub fn uninstall_filter(params: Params, mut client: Client) -> Result<Value, Error> {
     info!("eth_uninstallFilter");
     let filter_id = params.parse()
         .and_then(|(v,): (Value,)| transform::string_from_hex_value(&v))
@@ -106,9 +97,7 @@ pub fn uninstall_filter<T>(params: Params, mut client: SawtoothClient<T>)
     Ok(Value::Bool(client.filters.remove_filter(&filter_id).is_some()))
 }
 
-pub fn get_filter_changes<T>(params: Params, mut client: SawtoothClient<T>)
-    -> Result<Value, Error> where T: MessageSender
-{
+pub fn get_filter_changes(params: Params, mut client: Client) -> Result<Value, Error> {
     info!("eth_getFilterChanges");
     let filter_id = params.parse()
         .and_then(|(v,): (Value,)| transform::string_from_hex_value(&v))
@@ -168,9 +157,7 @@ pub fn get_filter_changes<T>(params: Params, mut client: SawtoothClient<T>)
     Ok(Value::Array(response))
 }
 
-pub fn get_filter_logs<T>(params: Params, mut client: SawtoothClient<T>)
-    -> Result<Value, Error> where T: MessageSender
-{
+pub fn get_filter_logs(params: Params, mut client: Client) -> Result<Value, Error> {
     info!("eth_getFilterLogs");
     let filter_id = params.parse()
         .and_then(|(v,): (Value,)| transform::string_from_hex_value(&v))
@@ -187,9 +174,7 @@ pub fn get_filter_logs<T>(params: Params, mut client: SawtoothClient<T>)
     }
 }
 
-pub fn get_logs<T>(params: Params, mut client: SawtoothClient<T>)
-    -> Result<Value, Error> where T: MessageSender
-{
+pub fn get_logs(params: Params, mut client: Client) -> Result<Value, Error> {
     info!("eth_getLogs");
     let (filter,): (Map<String, Value>,) = params.parse().map_err(|_|
         Error::invalid_params("Takes [filter: OBJECT]"))?;
@@ -198,10 +183,7 @@ pub fn get_logs<T>(params: Params, mut client: SawtoothClient<T>)
     get_logs_from_filter(&mut client, &log_filter)
 }
 
-fn get_logs_from_filter<T>(mut client: &mut SawtoothClient<T>, log_filter: &LogFilter)
-    -> Result<Value, Error>
-    where T: MessageSender
-{
+fn get_logs_from_filter(mut client: &mut Client, log_filter: &LogFilter) -> Result<Value, Error> {
 
     let interval = (log_filter.from_block, log_filter.to_block);
 
@@ -266,10 +248,7 @@ fn get_logs_from_filter<T>(mut client: &mut SawtoothClient<T>, log_filter: &LogF
     }
 }
 
-fn get_logs_from_block_and_filter<T>(client: &mut SawtoothClient<T>, block: &Block, log_filter: &LogFilter)
-    -> Result<Vec<Value>, Error>
-    where T: MessageSender
-{
+fn get_logs_from_block_and_filter(client: &mut Client, block: &Block, log_filter: &LogFilter) -> Result<Vec<Value>, Error> {
     let block_header: BlockHeader = protobuf::parse_from_bytes(&block.header).map_err(|e| {
         error!("Error parsing block header: {:?}", e);
         Error::internal_error()

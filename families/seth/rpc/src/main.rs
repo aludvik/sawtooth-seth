@@ -50,7 +50,7 @@ mod filters;
 mod transactions;
 mod transform;
 
-use client::{SawtoothClient};
+use client::{Client, SawtoothClient};
 use requests::{RequestExecutor, RequestHandler};
 use accounts::{Account};
 use calls::*;
@@ -118,8 +118,8 @@ fn main() {
     server.wait();
 }
 
-fn get_method_list<T>() -> Vec<(String, RequestHandler<T>)> where T: MessageSender {
-    let mut methods: Vec<(String, RequestHandler<T>)> = Vec::new();
+fn get_method_list() -> Vec<(String, RequestHandler)> {
+    let mut methods: Vec<(String, RequestHandler)> = Vec::new();
 
     methods.extend(account::get_method_list().into_iter());
     methods.extend(block::get_method_list().into_iter());

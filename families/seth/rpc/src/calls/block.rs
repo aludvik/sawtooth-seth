@@ -24,7 +24,6 @@ use requests::{RequestHandler};
 
 use client::{
     Client,
-    SawtoothClient,
     Error as ClientError,
     BlockKey,
 };
@@ -34,8 +33,8 @@ use sawtooth_sdk::messaging::stream::*;
 
 use sawtooth_sdk::messages::block::BlockHeader;
 
-pub fn get_method_list<T>() -> Vec<(String, RequestHandler<T>)> where T: MessageSender {
-    let mut methods: Vec<(String, RequestHandler<T>)> = Vec::new();
+pub fn get_method_list() -> Vec<(String, RequestHandler)> {
+    let mut methods: Vec<(String, RequestHandler)> = Vec::new();
 
     methods.push((String::from("eth_blockNumber"), block_number));
     methods.push((String::from("eth_getBlockByHash"), get_block_by_hash));
@@ -47,7 +46,7 @@ pub fn get_method_list<T>() -> Vec<(String, RequestHandler<T>)> where T: Message
 }
 
 // Return the block number of the current chain head, in hex, as a string
-pub fn block_number<T>(_params: Params, mut client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn block_number(_params: Params, mut client: Client) -> Result<Value, Error> {
     info!("eth_blockNumber");
     let block = client.get_current_block().map_err(|err| {
         error!("Error requesting block: {:?}", err);
@@ -64,7 +63,7 @@ pub fn block_number<T>(_params: Params, mut client: SawtoothClient<T>) -> Result
     Ok(Value::String(format!("{:#x}", block_header.block_num).into()))
 }
 
-fn get_block_obj<T>(block_key: BlockKey, mut client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+fn get_block_obj(block_key: BlockKey, mut client: Client) -> Result<Value, Error> {
     let block = match client.get_block(block_key) {
         Ok(b) => b,
         Err(error) => match error {
@@ -126,7 +125,7 @@ fn get_block_obj<T>(block_key: BlockKey, mut client: SawtoothClient<T>) -> Resul
 
 }
 
-fn get_block_transaction_count<T>(block_key: BlockKey, mut client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+fn get_block_transaction_count(block_key: BlockKey, mut client: Client) -> Result<Value, Error> {
     let block = match client.get_block(block_key) {
         Ok(b) => b,
         Err(error) => match error {
@@ -145,7 +144,7 @@ fn get_block_transaction_count<T>(block_key: BlockKey, mut client: SawtoothClien
 
 // Returns a block object using its "hash" to identify it. In Sawtooth, this is the blocks
 // signature, which is 64 bytes instead of 32.
-pub fn get_block_by_hash<T>(params: Params, client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn get_block_by_hash(params: Params, client: Client) -> Result<Value, Error> {
     info!("eth_getBlockByHash");
     let (block_hash, full): (String, bool) = match params.parse() {
         Ok(t) => t,
@@ -166,7 +165,7 @@ pub fn get_block_by_hash<T>(params: Params, client: SawtoothClient<T>) -> Result
     get_block_obj(BlockKey::Signature(block_hash), client)
 }
 
-pub fn get_block_by_number<T>(params: Params, client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn get_block_by_number(params: Params, client: Client) -> Result<Value, Error> {
     info!("eth_getBlockByNumber");
     let (block_num, full): (String, bool) = match params.parse() {
         Ok(t) => t,
@@ -195,7 +194,7 @@ pub fn get_block_by_number<T>(params: Params, client: SawtoothClient<T>) -> Resu
 }
 
 // Returns the number of transactions in a block
-pub fn get_block_transaction_count_by_hash<T>(params: Params, client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn get_block_transaction_count_by_hash(params: Params, client: Client) -> Result<Value, Error> {
     info!("eth_getBlockTransactionCountByHash");
     let (block_hash,): (String,) = match params.parse() {
         Ok(t) => t,
@@ -212,7 +211,7 @@ pub fn get_block_transaction_count_by_hash<T>(params: Params, client: SawtoothCl
     get_block_transaction_count(BlockKey::Signature(block_hash), client)
 }
 
-pub fn get_block_transaction_count_by_number<T>(params: Params, client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn get_block_transaction_count_by_number(params: Params, client: Client) -> Result<Value, Error> {
     info!("eth_getBlockTransactionCountByNumber");
     let (block_num,): (String,) = match params.parse() {
         Ok(t) => t,

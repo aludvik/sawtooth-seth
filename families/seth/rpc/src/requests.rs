@@ -18,28 +18,26 @@
 use futures_cpupool::{CpuPool};
 use jsonrpc_core::{Params, Value, Error, BoxFuture};
 
-use sawtooth_sdk::messaging::stream::*;
-
-use super::client::{SawtoothClient};
+use super::client::{Client};
 
 
-pub type RequestHandler<T> = fn(Params, SawtoothClient<T>) -> Result<Value, Error>;
+pub type RequestHandler = fn(Params, Client) -> Result<Value, Error>;
 
 #[derive(Clone)]
-pub struct RequestExecutor<T: MessageSender + Clone + Sync + Send + 'static> {
+pub struct RequestExecutor<T> where T: Client + Sized {
     pool: CpuPool,
-    client: SawtoothClient<T>,
+    client: T,
 }
 
-impl<T: MessageSender + Clone + Sync + Send + 'static> RequestExecutor<T> {
-    pub fn new(client: SawtoothClient<T>) -> Self {
+impl<T: Client + Sized> RequestExecutor<T> {
+    pub fn new(client: T) -> Self {
         RequestExecutor {
             pool: CpuPool::new_num_cpus(),
             client: client,
         }
     }
 
-    pub fn run(&self, params: Params, handler: RequestHandler<T>) -> BoxFuture<Value, Error> {
+    pub fn run(&self, params: Params, handler: RequestHandler) -> BoxFuture<Value, Error> {
         let client = self.client.clone();
         Box::new(self.pool.spawn_fn(move || {handler(params, client)}))
     }

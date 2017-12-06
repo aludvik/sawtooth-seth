@@ -17,15 +17,15 @@
 
 use jsonrpc_core::{Params, Value, Error};
 
-use client::{SawtoothClient};
+use client::{Client};
 use requests::{RequestHandler};
 
 use sawtooth_sdk::messaging::stream::MessageSender;
 
 const SAWTOOTH_NET_VERSION: &str = "19";
 
-pub fn get_method_list<T>() -> Vec<(String, RequestHandler<T>)> where T: MessageSender {
-    let mut methods: Vec<(String, RequestHandler<T>)> = Vec::new();
+pub fn get_method_list() -> Vec<(String, RequestHandler)> {
+    let mut methods: Vec<(String, RequestHandler)> = Vec::new();
 
     methods.push((String::from("net_version"), version));
     methods.push((String::from("net_peerCount"), peer_count));
@@ -35,19 +35,19 @@ pub fn get_method_list<T>() -> Vec<(String, RequestHandler<T>)> where T: Message
 }
 
 // Version refers to the particular network this JSON-RPC client is connected to
-pub fn version<T>(_params: Params, mut _client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn version(_params: Params, mut _client: Client) -> Result<Value, Error> {
     info!("net_version");
     Ok(Value::String(String::from(SAWTOOTH_NET_VERSION)))
 }
 
 // Since this is only for HTTP right now, there won't be any connected peers
-pub fn peer_count<T>(_params: Params, mut _client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn peer_count(_params: Params, mut _client: Client) -> Result<Value, Error> {
     info!("net_peerCount");
     Ok(Value::String(format!("{:#x}", 0)))
 }
 
 // Return whether we are listening for connections, which is always true
-pub fn listening<T>(_params: Params, mut _client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn listening(_params: Params, mut _client: Client) -> Result<Value, Error> {
     info!("net_listening");
     Ok(Value::Bool(true))
 }

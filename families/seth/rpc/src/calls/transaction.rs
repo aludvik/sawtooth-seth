@@ -22,7 +22,6 @@ use tiny_keccak;
 
 use client::{
     Client,
-    SawtoothClient,
     BlockKey,
     Error as ClientError,
 };
@@ -39,8 +38,8 @@ use messages::seth::{
     MessageCallTxn as MessageCallTxnPb,
 };
 
-pub fn get_method_list<T>() -> Vec<(String, RequestHandler<T>)> where T: MessageSender {
-    let mut methods: Vec<(String, RequestHandler<T>)> = Vec::new();
+pub fn get_method_list() -> Vec<(String, RequestHandler)> {
+    let mut methods: Vec<(String, RequestHandler)> = Vec::new();
 
     methods.push((String::from("eth_sendTransaction"), send_transaction));
     methods.push((String::from("eth_sendRawTransaction"), send_raw_transaction));
@@ -56,7 +55,7 @@ pub fn get_method_list<T>() -> Vec<(String, RequestHandler<T>)> where T: Message
     methods
 }
 
-pub fn send_transaction<T>(params: Params, mut client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn send_transaction(params: Params, mut client: Client) -> Result<Value, Error> {
     info!("eth_sendTransaction");
     let (txn,): (Map<String, Value>,) = params.parse().map_err(|_|
         Error::invalid_params("Takes [txn: OBJECT]"))?;
@@ -103,13 +102,13 @@ pub fn send_transaction<T>(params: Params, mut client: SawtoothClient<T>) -> Res
     Ok(transform::hex_prefix(&txn_signature))
 }
 
-pub fn send_raw_transaction<T>(_params: Params, mut _client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn send_raw_transaction(_params: Params, mut _client: Client) -> Result<Value, Error> {
     info!("eth_sendRawTransaction");
     // Implementing this requires substantial modification to the seth transaction family
     Err(error::not_implemented())
 }
 
-pub fn get_transaction_by_hash<T>(params: Params, client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn get_transaction_by_hash(params: Params, client: Client) -> Result<Value, Error> {
     info!("eth_getTransactionByHash");
     let (txn_hash,): (String,) = match params.parse() {
         Ok(t) => t,
@@ -127,7 +126,7 @@ pub fn get_transaction_by_hash<T>(params: Params, client: SawtoothClient<T>) -> 
     get_transaction(client, &TransactionKey::Signature(txn_hash))
 }
 
-pub fn get_transaction_by_block_hash_and_index<T>(params: Params, client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn get_transaction_by_block_hash_and_index(params: Params, client: Client) -> Result<Value, Error> {
     info!("eth_getTransactionByBlockHashAndIndex");
     let (block_hash, index): (String, String) = match params.parse() {
         Ok(t) => t,
@@ -156,7 +155,7 @@ pub fn get_transaction_by_block_hash_and_index<T>(params: Params, client: Sawtoo
     get_transaction(client, &TransactionKey::Index((index, BlockKey::Signature(block_hash))))
 }
 
-pub fn get_transaction_by_block_number_and_index<T>(params: Params, client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn get_transaction_by_block_number_and_index(params: Params, client: Client) -> Result<Value, Error> {
     info!("eth_getTransactionByBlockNumberAndIndex");
     let (block_num, index): (String, String) = match params.parse() {
         Ok(t) => t,
@@ -190,7 +189,7 @@ pub fn get_transaction_by_block_number_and_index<T>(params: Params, client: Sawt
     get_transaction(client, &TransactionKey::Index((index, BlockKey::Number(block_num))))
 }
 
-fn get_transaction<T>(mut client: SawtoothClient<T>, txn_key: &TransactionKey) -> Result<Value, Error> where T: MessageSender {
+fn get_transaction(mut client: Client, txn_key: &TransactionKey) -> Result<Value, Error> {
     let (txn, block) = match client.get_transaction_and_block(txn_key) {
         Ok(t) => t,
         Err(error) => match error {
@@ -243,7 +242,7 @@ fn get_transaction<T>(mut client: SawtoothClient<T>, txn_key: &TransactionKey) -
 
 }
 
-pub fn get_transaction_receipt<T>(params: Params, mut client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn get_transaction_receipt(params: Params, mut client: Client) -> Result<Value, Error> {
     info!("eth_getTransactionReceipt");
     let txn_id: String = params.parse()
         .map_err(|_| Error::invalid_params("Takes [txnHash: DATA(64)]"))
@@ -290,18 +289,18 @@ pub fn get_transaction_receipt<T>(params: Params, mut client: SawtoothClient<T>)
         &receipt, index as u64, &block.header_signature, block_header.block_num))
 }
 
-pub fn gas_price<T>(_params: Params, mut _client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn gas_price(_params: Params, mut _client: Client) -> Result<Value, Error> {
     info!("eth_gasPrice");
     Ok(Value::String(format!("{:#x}", 0)))
 }
 
-pub fn estimate_gas<T>(_params: Params, mut _client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn estimate_gas(_params: Params, mut _client: Client) -> Result<Value, Error> {
     info!("eth_estimateGas");
     // Implementing this requires running the EVM, which is not possible within the RPC.
     Err(error::not_implemented())
 }
 
-pub fn sign<T>(params: Params, client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn sign(params: Params, client: Client) -> Result<Value, Error> {
     info!("eth_sign");
     let (address, payload): (String, String) = params.parse()
         .map_err(|_| Error::invalid_params("Takes [txnHash: DATA(64)]"))?;
@@ -335,7 +334,7 @@ pub fn sign<T>(params: Params, client: SawtoothClient<T>) -> Result<Value, Error
     Ok(transform::hex_prefix(&signature))
 }
 
-pub fn call<T>(_params: Params, mut _client: SawtoothClient<T>) -> Result<Value, Error> where T: MessageSender {
+pub fn call(_params: Params, mut _client: Client) -> Result<Value, Error> {
     info!("eth_call");
     // Implementing this requires running the EVM, which is not possible within the RPC.
     Err(error::not_implemented())
